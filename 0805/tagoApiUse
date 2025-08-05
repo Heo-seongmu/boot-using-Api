@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+<meta charset="UTF-8">
+<title>Insert title here</title>
+<!-- 부트스트랩 css -->
+<link
+	href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css"
+	rel="stylesheet"
+	integrity="sha384-LN+7fdVzj6u52u30Kp6M/trliBMCMKTyK833zpbD+pXdCLuTusPj697FH4R/5mcr"
+	crossorigin="anonymous">
+<!-- 부트스트랩 js  -->
+<script
+	src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"
+	integrity="sha384-ndDqU0Gzau9qJ1lfW4pNLlhNTkCfHzAVBReH9diLvGRem5+R9g2FzA8ZGN954O5Q"
+	crossorigin="anonymous"></script>
+</head>
+<body>
+	<div class="container">
+	
+		<button class="btn btn-primary w-100 mb-3" onclick="getStationList()">주변 정류소 조회</button>
+	
+		<div class = "row">
+			<!-- 정류소 목록 -->
+			<div class="col-4">
+				<div id="stationList" class="list-group">
+					<button type="button" data-bs-toggle="list"
+						class="list-group-item list-group-item-action">정류소</button>
+					
+				</div>
+
+			</div>
+
+			<!-- 선택된 정류소에 도착하는 버스 정보 출력 -->
+			<div class="col-4">
+				<div id="busList" class="list-group">
+					<button type="button" data-bs-toggle="list"
+						class="list-group-item list-group-item-action">버스</button>
+					
+				</div>
+			</div>
+		</div>
+		<div></div>
+
+	</div>
+	
+	
+ <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+ <script type="text/javascript">
+ 	let gpsLati = "37.481799";
+ 	let gpsLong = "126.645130";
+ 	function getStationList(lat, lng){
+ 		$.ajax({
+ 			type: "get",
+ 			url: "/getStationList",
+ 			data: {'lat' : gpsLati, 'lng' : gpsLong},
+ 			dataType: 'json',
+ 			success : function(res){
+ 				console.log(res.response.body.items.item); //[ ]
+ 				showStationList( res.response.body.items.item )
+ 			}
+
+ 		});
+ 		
+ 	}
+ 	
+ 	const stationListBox = document.getElementById('stationList');
+ 	
+ 	function showStationList(stList){	
+ 		stationListBox.innerHTML="";
+ 		for(let st of stList){
+ 			console.log(st.nodenm)
+ 			stationListBox.innerHTML +=`<button type="button" data-bs-toggle="list"
+				class="list-group-item list-group-item-action" onclick="getBusArriveInfo('${st.citycode}','${st.nodeid}')">${st.nodenm}</button>`;
+ 		}
+ 		
+ 	}
+ 	
+ 	function getBusArriveInfo(citycode, nodeid){ // 도시코드, 정류소 아이디
+ 		console.log("도시코드 : " + citycode)
+ 		console.log("정류소 아이디 : " + nodeid)
+ 		$.ajax({
+ 			type: "get",
+ 			url: "/getBusArriveInfo",
+ 			data: {'citycode' : citycode, 'nodeid' : nodeid},
+ 			dataType: 'json',
+ 			success : function(res){
+ 				console.log(res.response.body.items.item); //[ ]
+ 				showBusList( res.response.body.items.item )
+ 			}
+
+ 		});
+ 	}
+ 	
+ 	const busListBox = document.getElementById('busList');
+ 	function showBusList(bsList){
+ 		busListBox.innerHTML = "";
+ 		for(let bt of bsList){
+ 			busListBox.innerHTML += `<button type="button" data-bs-toggle="list"
+				class="list-group-item list-group-item-action">${bt.routeno}번 ${bt.routetp} ${bt.arrprevstationcnt}개전</button>`;
+ 		}
+ 	}
+ 	
+ 	
+ </script>
+</body>
+</html>
+
+================================================================
+package hsm.bootproject.tagoProject.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import hsm.bootproject.tagoProject.apiUtil.TagoRequestService;
+
+@Controller
+public class TagoController {
+
+	@Autowired
+	private TagoRequestService tagoRequestService;
+	
+	@GetMapping("/")
+	public String home() {
+		return "home";
+	}
+	
+	@GetMapping("/getStationList")
+	@ResponseBody
+	public String getStationList(@RequestParam("lat") String lat, @RequestParam("lng") String lng) {
+		System.out.println("주변 정류소 목록 조회 요청");
+		System.out.println("위도 : " + lat + ", 경도 : " + lng);
+		// 좌표 기반의 정류소 목록 조회(서비스 호출)
+		
+		
+		return tagoRequestService.getStationListByGps(lat, lng);
+	}
+	
+	@GetMapping("/getBusArriveInfo")
+	@ResponseBody
+	public String getBusArriveInfo(@RequestParam("citycode") String citycode, @RequestParam("nodeid") String nodeid) {
+		
+		return tagoRequestService.getbusListStation(citycode, nodeid);
+		
+	}
+}
+==========================================================================
+package hsm.bootproject.tagoProject.apiUtil;
+
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.ClassicHttpRequest;
+import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.http.io.support.ClassicRequestBuilder;
+import org.springframework.stereotype.Component;
+
+@Component
+public class TagoRequestService {
+
+	/* 공공데이터 포털 API */
+	private final String APIKEY = "wt7ojtWy+hVKAvU1h5oM7CwYBJE8fnQZbTlSC+23M8YB6VNB7abitXu1ZSEAVfcDjqnQbLREL7N7b8+dkEalhg==";
+	// 좌표기반 버스 정류소 목록 조회
+	public String getStationListByGps(String lat, String lng) {
+		//API 요청 >> 응답 데이터 반환
+		
+		try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
+		    ClassicHttpRequest httpGet = ClassicRequestBuilder.get("http://apis.data.go.kr/1613000/BusSttnInfoInqireService/getCrdntPrxmtSttnList")
+		            .addParameter("servicekey",APIKEY)
+		            .addParameter("numOfRows","20")
+		            .addParameter("_type","json")
+		            .addParameter("gpsLati",lat)
+		            .addParameter("gpsLong",lng)
+		    		.build();
+		   String data = httpclient.execute(httpGet, response -> {
+		        System.out.println(response.getCode() + " " + response.getReasonPhrase());
+		        final HttpEntity entity1 = response.getEntity();		        
+		        String resData = EntityUtils.toString(entity1); 
+		        EntityUtils.consume(entity1);
+		        return resData;
+		    });
+		   return data;
+		   
+		}catch (Exception e) {
+			e.printStackTrace();
+			return null;
+		}		
+	}
+	public String getbusListStation(String citycode, String nodeid) {
+		try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
+		    ClassicHttpRequest httpGet = ClassicRequestBuilder.get("http://apis.data.go.kr/1613000/ArvlInfoInqireService/getSttnAcctoArvlPrearngeInfoList")
+		            .addParameter("servicekey",APIKEY)
+		            .addParameter("pageNo", "1")
+		            .addParameter("numOfRows","4")
+		            .addParameter("_type","json")
+		            .addParameter("cityCode",citycode)
+		            .addParameter("nodeId",nodeid)
+		    		.build();
+		   String data = httpclient.execute(httpGet, response -> {
+		        System.out.println(response.getCode() + " " + response.getReasonPhrase());
+		        final HttpEntity entity1 = response.getEntity();		        
+		        String resData = EntityUtils.toString(entity1); 
+		        EntityUtils.consume(entity1);
+		        return resData;
+		    });
+		   return data;
+		   
+		}catch (Exception e) {
+			e.printStackTrace();
+			return null;
+		}		
+	}
+	
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
