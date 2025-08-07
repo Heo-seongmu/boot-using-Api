@@ -1,0 +1,179 @@
+
+	<div class="container">
+		
+		<div th:if="${session.loginUser == null}" class="my-2">
+		<a href="kakaoLogin"><img alt="" src="/KakaoImg/kakao_login_medium_narrow.png"></a>
+		</div>
+		
+		<div th:if="${session.loginUser != null}" class="my-2">
+			<img alt="" th:src="${session.loginUser.profile_image}" style="width:50px; height:50px;">
+			<span th:text="${session.loginUser.nickname}"></span>
+			<button>로그아웃</button>
+		</div>
+=====================================================================
+package ykd.bootProject.TagoProject.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+
+import jakarta.servlet.http.HttpSession;
+import ykd.bootProject.TagoProject.dto.KakaoUserDto;
+import ykd.bootProject.TagoProject.service.KakaoService;
+
+@Controller
+public class KakaoController {
+
+	@Value("${kakao.api.key}")
+	private String client_id;
+	
+	@Value("${kakao.redirect.uri}")
+	private String redirect_uri;
+	
+	@Autowired
+	private KakaoService kakaoService;
+	
+	@Autowired
+	private HttpSession session;
+	
+	@GetMapping("/kakaoLogin")
+	public String kakaoLogin() {
+		System.out.println("kakao 인가 코드 요청");
+
+		// 요청 주소
+		String request_url = "https://kauth.kakao.com/oauth/authorize";
+
+
+		return "redirect:" + request_url + "?client_id=" + client_id + "&redirect_uri=" + redirect_uri
+				+ "&response_type=code";
+	}
+
+	@GetMapping("kakaoAuthCode")
+	public String kakaoAuthCode(@RequestParam("code") String code) {
+		System.out.println("인가 코드 : " + code);
+
+		// 인증 토큰으로 카카오 사용자 정보 조회
+		KakaoUserDto loginUser = kakaoService.getKakaoUserInfo(code);
+		// 조회된 카카오 사용자 정보로 로그인 처리
+		session.setAttribute("loginUser", loginUser);
+		return "home";
+	}
+}
+=============================================================================
+package ykd.bootProject.TagoProject.service;
+
+import java.util.Arrays;
+
+import org.apache.hc.client5.http.entity.UrlEncodedFormEntity;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.ClassicHttpRequest;
+import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.http.io.support.ClassicRequestBuilder;
+import org.apache.hc.core5.http.message.BasicNameValuePair;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
+import ykd.bootProject.TagoProject.dto.KakaoUserDto;
+
+@Service
+public class KakaoService {
+	
+	@Value("${kakao.api.key}")
+	private String client_id;
+	
+	@Value("${kakao.redirect.uri}")
+	private String redirect_uri;
+	
+
+	
+	
+	// HttpClient
+	public String kakao_request_token(String code) { 
+		
+		try (CloseableHttpClient httpclient = HttpClients.createDefault()) {		  
+		   
+			ClassicHttpRequest httpPost = ClassicRequestBuilder.post("https://kauth.kakao.com/oauth/token")
+		            .setEntity(new UrlEncodedFormEntity(Arrays.asList(
+		                    new BasicNameValuePair("grant_type", "authorization_code"),
+		                    new BasicNameValuePair("client_id", client_id),
+		                    new BasicNameValuePair("redirect_uri",redirect_uri),
+		                    new BasicNameValuePair("code",code))))
+		            .build();
+			httpPost.addHeader("Content-Type","application/x-www-form-urlencoded;charset=utf-8");
+			
+		   String data = httpclient.execute(httpPost, response -> {
+		        System.out.println(response.getCode() + " " + response.getReasonPhrase());
+		        final HttpEntity entity2 = response.getEntity();		        
+		        String resData = EntityUtils.toString(entity2);
+		        return resData;
+		    });
+		   return data;
+		}catch (Exception e) {
+			e.printStackTrace();
+			return null;
+		}
+		
+	}
+	
+	private String kakao_request_userInfo(String access_token) {
+		try (CloseableHttpClient httpclient = HttpClients.createDefault()) {		  
+			   
+			ClassicHttpRequest httpPost = ClassicRequestBuilder.post("https://kapi.kakao.com/v2/user/me")
+		            
+		            .build();
+			httpPost.addHeader("Authorization","Bearer " +access_token);			
+			httpPost.addHeader("Content-Type","application/x-www-form-urlencoded;charset=utf-8");
+			
+		   String data = httpclient.execute(httpPost, response -> {
+		        System.out.println(response.getCode() + " " + response.getReasonPhrase());
+		        final HttpEntity entity2 = response.getEntity();		        
+		        String resData = EntityUtils.toString(entity2);
+		        return resData;
+		    });
+		   return data;
+		}catch (Exception e) {
+			e.printStackTrace();
+			return null;
+		}
+	}
+	
+	
+
+	public KakaoUserDto getKakaoUserInfo(String code) {
+		// 인가 코드로 인증 토큰 요청
+		String tokenResponse = kakao_request_token(code);
+		String access_token = JsonParser.parseString(tokenResponse).getAsJsonObject()
+		.get("access_token").getAsString();
+		System.out.println(access_token);
+		// 인증 토큰으로 카카오 사용자 정보 조회
+		String userInfoResponse = kakao_request_userInfo(access_token);		
+		JsonObject userInfoObj = JsonParser.parseString(userInfoResponse).getAsJsonObject();
+		
+		String kakaoid = userInfoObj.get("id").getAsString();
+		String nickname = userInfoObj.get("properties").getAsJsonObject().get("nickname").getAsString();
+		String profile_image = userInfoObj.get("properties").getAsJsonObject().get("profile_image").getAsString();
+		
+		System.out.println("kakaoid : " + kakaoid);
+		System.out.println("nickname : " + nickname);
+		System.out.println("profile_image : " + profile_image);
+		
+		KakaoUserDto kakaoDto = new KakaoUserDto();
+		kakaoDto.setKakaoid(kakaoid);
+		kakaoDto.setNickname(nickname);
+		kakaoDto.setProfile_image(profile_image);
+		
+		return kakaoDto;
+		
+	}
+
+	
+	
+}
+===================================================================
