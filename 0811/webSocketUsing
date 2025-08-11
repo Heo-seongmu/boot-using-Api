@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+<meta charset="UTF-8">
+<title>Insert title here</title>
+<!-- 부트스트랩 css -->
+<link
+	href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css"
+	rel="stylesheet"
+	integrity="sha384-LN+7fdVzj6u52u30Kp6M/trliBMCMKTyK833zpbD+pXdCLuTusPj697FH4R/5mcr"
+	crossorigin="anonymous">
+<!-- 부트스트랩 js -->
+<script
+	src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"
+	integrity="sha384-ndDqU0Gzau9qJ1lfW4pNLlhNTkCfHzAVBReH9diLvGRem5+R9g2FzA8ZGN954O5Q"
+	crossorigin="anonymous"></script>
+<!-- JQUERY -->
+<script
+	src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+</head>
+<body>
+	<h1>home.html</h1>
+	
+	
+	<!-- 채팅을 출력할 요소 -->
+	<div id="chatBox"></div>
+	<input type="text" id="inputText"><button onclick="sendMessage()">전송</button>
+
+
+
+
+	<script type="text/javascript" src="/webjars/sockjs-client/1.5.1/sockjs.js"></script>
+	<script type="text/javascript" src="/webjars/stomp-websocket/2.3.4/stomp.js"></script>
+	
+	<script type="text/javascript">
+		/* webSocket에 연결(접속요청) */
+		
+		const ChatSocket = new SockJS("/ws-chatin");
+		let chatClient = Stomp.over(ChatSocket);
+		chatClient.connect({},function(frame){
+			
+			console.log("chatSocket 연결 확인");
+			console.log(frame);
+			
+		/* 서버에서 전송되는 메세지의 종류 구분 (구독) */
+			chatClient.subscribe("/ServerToClient/publicMsg", function(msg){
+				// 실행할 코드
+				console.log(msg.body);
+				// chatBox에 메세지를 출력하는 기능
+				showMessage(msg.body);
+			});
+			
+		});
+	
+		/* 클라이언트에서 서버에게 메세지를 전송하는 기능 */
+		const inputEl = document.getElementById('inputText');
+		function sendMessage(){
+			// input 태그에 입력한 값을 웹소켓 서버에 전송
+			chatClient.send("/ClientToServer/chat",{},inputEl.value) // 보내는 메세지 object >> String(JSON FORMAT)
+			inputEl.value="";				 
+		}
+
+		/* 서버에서 받은 메세지를 출력하는 기능 */
+		const chatBoxEl = document.getElementById('chatBox');
+		function showMessage(msg){
+			let msgObj = JSON.parse(msg);
+			chatBoxEl.innerHTML += `<p>${msgObj.sender} : ${msgObj.content}<p>`;
+		}
+		
+	</script>
+
+
+</body>
+</html>
+========================================================================
+package hsm.bootproject.websocketProject.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.stereotype.Controller;
+
+import hsm.bootproject.websocketProject.dto.MessageDto;
+import jakarta.servlet.http.HttpSession;
+
+@Controller
+public class ChatController {
+	// 웹소켓 메세지를 처리할 컨트롤러
+	
+	@Autowired
+	private SimpMessagingTemplate messagingTemplate;
+	
+	@Autowired
+	private HttpSession session;
+	
+	@MessageMapping("/chat")
+	public void semdMessage(String msg) {
+		
+		System.out.println("클라이언트에서 보내는 메세지 : " + msg);
+		
+		MessageDto msgDto = new MessageDto();
+		msgDto.setContent(msg);
+		msgDto.setSender("임규아");
+		
+		// 서버가 모든 클라이언트들에게 메세지를 전파
+		messagingTemplate.convertAndSend("/ServerToClient/publicMsg",msgDto);
+	}
+	
+}
+
+=========================================================================
+package hsm.bootproject.websocketProject.sockUtil;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
+import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+
+@Configuration
+@EnableWebSocketMessageBroker
+public class SocketConfig implements WebSocketMessageBrokerConfigurer{
+
+	@Override
+	public void registerStompEndpoints(StompEndpointRegistry registry) {
+		// 접속 주소 만드는 매소드
+		registry.addEndpoint("/ws-chatin")
+				.withSockJS();
+		
+	}
+
+	@Override
+	public void configureMessageBroker(MessageBrokerRegistry registry) {
+		
+		registry.setApplicationDestinationPrefixes("/ClientToServer"); // 클라이언트가 서버에게 메세지를 전송할 때 사용
+		registry.enableSimpleBroker("/ServerToClient"); // 서버가 클라이언트에게 메세지를 전송할 때 사용
+		
+		
+	}
+
+	
+}
+===================================================================
+
+
+
+
+
