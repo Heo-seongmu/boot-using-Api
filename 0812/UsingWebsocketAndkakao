@@ -1,0 +1,195 @@
+@Value("${kakao.api.key}")
+	private String client_id;
+	
+	@Value("${kakao.redirect_uri}")
+	private String redirect_uri;
+	
+	@GetMapping("/kakaoLogin")
+	public String kakaoLogin() {
+		
+		
+		return "redirect:https://kauth.kakao.com/oauth/authorize?client_id=" + client_id
+				+"&redirect_uri=" + redirect_uri
+				+"&response_type=code";
+	}
+	
+	@GetMapping("/loginByKakao")
+	public String loginByKakao(@RequestParam("code") String code) {
+		 System.out.println("인가코드 : " + code);
+		 // 카카오 계정 조회
+		 try {
+			KakaoUserDto userDto = kakaoservice.getKakaoUserInfo(code);
+			// 조회된 계정 정보를 세션에 저장
+			session.setAttribute("username", userDto.getNickname());
+			return "chat";
+		} catch (Exception e) {
+			e.printStackTrace();
+			return "home";
+		}
+		 
+	}
+==============================================================
+package hsm.bootproject.websocketProject.service;
+
+import java.util.Arrays;
+
+import org.apache.hc.client5.http.entity.UrlEncodedFormEntity;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.ClassicHttpRequest;
+import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.http.io.support.ClassicRequestBuilder;
+import org.apache.hc.core5.http.message.BasicNameValuePair;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
+import hsm.bootproject.websocketProject.dto.KakaoUserDto;
+
+@Service
+public class kakaoService {
+
+	@Value("${kakao.api.key}")
+	private String client_id;
+
+	@Value("${kakao.redirect_uri}")
+	private String redirect_uri;
+
+	// 카카오 인증 토큰 요청
+	private String getAuthToken(String code) throws Exception {
+		try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
+
+			ClassicHttpRequest httpPost = ClassicRequestBuilder.post("https://kauth.kakao.com/oauth/token")
+					.setEntity(new UrlEncodedFormEntity(
+							Arrays.asList(new BasicNameValuePair("grant_type", "authorization_code"),
+									new BasicNameValuePair("client_id", client_id),
+									new BasicNameValuePair("redirect_uri", redirect_uri),
+									new BasicNameValuePair("code", code))))
+					.build();
+
+			httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded;charset=utf-8");
+
+			String data = httpclient.execute(httpPost, response -> {
+				System.out.println(response.getCode() + " " + response.getReasonPhrase());
+				final HttpEntity entity2 = response.getEntity();
+				String resData = EntityUtils.toString(entity2);
+				EntityUtils.consume(entity2);
+				return resData;
+			});
+			return data;
+		}
+	}
+
+	private String getUserInfo(String access_token) throws Exception{
+		try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
+
+			ClassicHttpRequest httpPost = ClassicRequestBuilder.post("https://kapi.kakao.com/v2/user/me")
+					
+					.build();
+
+			httpPost.addHeader("Authorization", "Bearer " + access_token);
+			httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded;charset=utf-8");
+
+			String data = httpclient.execute(httpPost, response -> {
+				System.out.println(response.getCode() + " " + response.getReasonPhrase());
+				final HttpEntity entity2 = response.getEntity();
+				String resData = EntityUtils.toString(entity2);
+				EntityUtils.consume(entity2);
+				return resData;
+			});
+			return data;
+		}
+	}
+
+	
+
+	public KakaoUserDto getKakaoUserInfo(String code) throws Exception {
+
+		// 인가코드(code)로 인증 토큰 요청
+		String token_Response = getAuthToken(code);
+		// access_token 추출
+		String access_token = JsonParser.parseString(token_Response).getAsJsonObject().get("access_token")
+				.getAsString();
+		// 인증 토큰으로 사용자 정보 조회
+		String userInfo_Response = getUserInfo(access_token);
+		System.out.println(userInfo_Response);
+		// 응답데이터(사용자 정보)를 kakaouserDto 변환 후 리턴
+		JsonObject userInfoObj = JsonParser.parseString(userInfo_Response).getAsJsonObject();
+		
+		String id = userInfoObj.get("id").getAsString();
+		
+		JsonObject properties = userInfoObj.get("properties").getAsJsonObject();
+		String nickname = properties.get("nickname").getAsString();
+		String profile_image = properties.get("profile_image").getAsString();
+		
+		KakaoUserDto userDto = new KakaoUserDto();
+		userDto.setId(id);
+		userDto.setProfile_image(profile_image);
+		userDto.setNickname(nickname);
+				
+		return userDto;
+	}
+
+}
+
+==============================================================
+
+package hsm.bootproject.websocketProject.sockUtil;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.event.EventListener;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
+import org.springframework.stereotype.Component;
+import org.springframework.web.socket.messaging.SessionConnectEvent;
+import org.springframework.web.socket.messaging.SessionDisconnectEvent;
+
+@Component
+public class WebSocketInout {
+	
+	@Autowired
+	private SimpMessagingTemplate messagingTemplate;
+
+	@EventListener
+	public void chatConnect(SessionConnectEvent connectEvent) {
+		System.out.println("웹 소켓 접속!-!");
+		// 다른 클라이언트에게 입장 메세지 전송!
+		// 접속한 클라이언트의 세션값(username)
+		StompHeaderAccessor accessor = StompHeaderAccessor.wrap(connectEvent.getMessage());
+		String username = (String)accessor.getSessionAttributes().get("username");
+		
+		messagingTemplate.convertAndSend("/ServerToClient/inout",username + " 이/가 입장");
+	}
+	
+	@EventListener
+	public void chatDisconnect(SessionDisconnectEvent disconnectEvent) {
+		System.out.println("웹 소켓 연결 해제 ㅜ!ㅜ");
+		// 다른 클라이언트에게 퇴장 메세지 전송!
+		
+		StompHeaderAccessor accessor = StompHeaderAccessor.wrap(disconnectEvent.getMessage());
+		String username = (String)accessor.getSessionAttributes().get("username");
+		
+		messagingTemplate.convertAndSend("/ServerToClient/inout",username + " 이/가 퇴장");
+	}
+	
+}
+
+===================================================================
+	
+			chatClient.subscribe("/ServerToClient/inout", function(msg){
+				console.log(msg.body);
+				showInout(msg.body);
+			});
+
+
+			function showInout(msg){
+			const chatBoxEl = document.getElementById('chatBox');
+			chatBoxEl.innerHTML += `<div class="text-center">
+					<div class="inoutMsg">						
+					 ${msg}
+					</div>
+					</div>`;
+		}
